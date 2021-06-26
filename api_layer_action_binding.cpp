@@ -7,8 +7,23 @@
 
 extern "C" {
 
+// for logging purposes
 static const char *_layerName = NULL;;
-static PFN_xrGetInstanceProcAddr _cachedNextXrGetInstanceProcAddr = NULL;
+
+// load next function pointers in _xrCreateApiLayerInstance
+static PFN_xrGetInstanceProcAddr _nextXrGetInstanceProcAddr = NULL;
+static PFN_xrCreateActionSet _nextXrCreateActionSet = NULL;
+
+static XRAPI_ATTR XrResult XRAPI_CALL
+_xrCreateActionSet(
+	XrInstance instance,
+	const XrActionSetCreateInfo* createInfo,
+	XrActionSet* actionSet) {
+
+	std::cout << _layerName << ": xrCreateActionSet " << createInfo->actionSetName << std::endl;
+
+	return _nextXrCreateActionSet(instance, createInfo, actionSet);
+}
 
 static XRAPI_ATTR XrResult XRAPI_CALL
 _xrGetInstanceProcAddr(
@@ -18,24 +33,40 @@ _xrGetInstanceProcAddr(
 {
 	// std::cout << _layerName << ": " << name << std::endl;
 
-	_cachedNextXrGetInstanceProcAddr(instance, name, function);
+	std::string func_name = name;
 
-	return XR_SUCCESS;
+	if (func_name == "xrCreateActionSet") {
+		*function = (PFN_xrVoidFunction) _xrCreateActionSet;
+		return XR_SUCCESS;
+	}
+
+	return _nextXrGetInstanceProcAddr(instance, name, function);
 }
 
 static XrResult XRAPI_PTR
 _xrCreateApiLayerInstance(const XrInstanceCreateInfo *info,
 	const XrApiLayerCreateInfo *apiLayerInfo, XrInstance *instance)
 {
-	PFN_xrGetInstanceProcAddr nextXrGetInstanceProcAddr = apiLayerInfo->nextInfo->nextGetInstanceProcAddr;
-	PFN_xrCreateApiLayerInstance nextXrCreateApiLayerInstance = apiLayerInfo->nextInfo->nextCreateApiLayerInstance;
+	_nextXrGetInstanceProcAddr = apiLayerInfo->nextInfo->nextGetInstanceProcAddr;
+	XrResult result;
 
+	// first let the instance be created
+	result = apiLayerInfo->nextInfo->nextCreateApiLayerInstance(info, apiLayerInfo, instance);
+	if (XR_FAILED(result)) {
+		std::cout << "Failed to load xrCreateActionSet" << std::endl;
+		return result;
+	}
 
-	_cachedNextXrGetInstanceProcAddr = nextXrGetInstanceProcAddr;
+	// then use the created instance to load next function pointers
+	result = _nextXrGetInstanceProcAddr(*instance, "xrCreateActionSet", (PFN_xrVoidFunction*)&_nextXrCreateActionSet);
+	if (XR_FAILED(result)) {
+		std::cout << "Failed to load xrCreateActionSet" << std::endl;
+		return result;
+	}
 
 	std::cout << _layerName << ": Created api layer instance" << std::endl;
 
-	return nextXrCreateApiLayerInstance(info, apiLayerInfo, instance);
+	return result;
 }
 
 XrResult

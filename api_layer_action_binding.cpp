@@ -9,7 +9,6 @@ extern "C" {
 
 // for logging purposes
 static const char *_layerName = NULL;
-;
 
 // load next function pointers in _xrCreateApiLayerInstance
 static PFN_xrGetInstanceProcAddr _nextXrGetInstanceProcAddr = NULL;

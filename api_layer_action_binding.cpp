@@ -3,6 +3,7 @@
 
 #include <string.h>
 
+#include <map>
 #include <iostream>
 
 extern "C" {
@@ -13,14 +14,42 @@ static const char *_layerName = NULL;
 // load next function pointers in _xrCreateApiLayerInstance
 static PFN_xrGetInstanceProcAddr _nextXrGetInstanceProcAddr = NULL;
 static PFN_xrCreateActionSet _nextXrCreateActionSet = NULL;
+static PFN_xrCreateAction _nextXrCreateAction = NULL;
+
+// cache create infos
+static std::map<XrActionSet, XrActionSetCreateInfo> actionSetInfos;
+static std::map<XrAction, XrActionCreateInfo> actionInfos;
+
 
 static XRAPI_ATTR XrResult XRAPI_CALL
 _xrCreateActionSet(XrInstance instance, const XrActionSetCreateInfo *createInfo, XrActionSet *actionSet)
 {
 
-	std::cout << _layerName << ": xrCreateActionSet " << createInfo->actionSetName << std::endl;
 
-	return _nextXrCreateActionSet(instance, createInfo, actionSet);
+	XrResult res = _nextXrCreateActionSet(instance, createInfo, actionSet);
+	if (XR_SUCCEEDED(res)) {
+		std::cout << _layerName << ": created action set " << createInfo->actionSetName << "|" << *actionSet
+		          << std::endl;
+		actionSetInfos[*actionSet] = *createInfo;
+	} else {
+		std::cout << _layerName << ": xrCreateActionSet failed for " << createInfo->actionSetName << std::endl;
+	}
+	return res;
+}
+
+static XRAPI_ATTR XrResult XRAPI_CALL
+_xrCreateAction(XrActionSet actionSet, const XrActionCreateInfo *createInfo, XrAction *action)
+{
+
+	XrResult res = _nextXrCreateAction(actionSet, createInfo, action);
+	if (XR_SUCCEEDED(res)) {
+		std::cout << _layerName << ": created action " << createInfo->actionName << "|" << *action
+		          << " in action set " << actionSetInfos[actionSet].actionSetName << std::endl;
+		actionInfos[*action] = *createInfo;
+	} else {
+		std::cout << _layerName << ": xrCreateAction failed for" << createInfo->actionName << std::endl;
+	}
+	return res;
 }
 
 static XRAPI_ATTR XrResult XRAPI_CALL
@@ -32,6 +61,11 @@ _xrGetInstanceProcAddr(XrInstance instance, const char *name, PFN_xrVoidFunction
 
 	if (func_name == "xrCreateActionSet") {
 		*function = (PFN_xrVoidFunction)_xrCreateActionSet;
+		return XR_SUCCESS;
+	}
+
+	if (func_name == "xrCreateAction") {
+		*function = (PFN_xrVoidFunction)_xrCreateAction;
 		return XR_SUCCESS;
 	}
 
@@ -58,6 +92,12 @@ _xrCreateApiLayerInstance(const XrInstanceCreateInfo *info,
 	    _nextXrGetInstanceProcAddr(*instance, "xrCreateActionSet", (PFN_xrVoidFunction *)&_nextXrCreateActionSet);
 	if (XR_FAILED(result)) {
 		std::cout << "Failed to load xrCreateActionSet" << std::endl;
+		return result;
+	}
+
+	result = _nextXrGetInstanceProcAddr(*instance, "xrCreateAction", (PFN_xrVoidFunction *)&_nextXrCreateAction);
+	if (XR_FAILED(result)) {
+		std::cout << "Failed to load xrCreateAction" << std::endl;
 		return result;
 	}
 

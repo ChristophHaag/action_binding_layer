@@ -151,6 +151,17 @@ createModifiedBindings(XrInstance instance,
 		for (const auto &profileBindings : *bindings) {
 			XrInteractionProfileSuggestedBinding *b = profileBindings.second;
 
+			ImGui::Begin(paths[b->interactionProfile].c_str());
+			ImGui::Text("Sugggested by app");
+			for (uint32_t i = 0; i < b->countSuggestedBindings; i++) {
+				XrAction action = b->suggestedBindings[i].action;
+				std::string s = std::string(actionInfos[action].actionName);
+				s += " -> ";
+				s += paths[b->suggestedBindings[i].binding];
+				ImGui::Text(s.c_str());
+			}
+			ImGui::End();
+
 			// TODO modify something
 			(*modifiedBindings)[profileBindings.first] = b;
 		}

@@ -1,3 +1,5 @@
+#include <ui.h>
+
 #include <openxr/openxr.h>
 #include "external/loader_interfaces.h"
 
@@ -19,13 +21,18 @@ static PFN_xrCreateActionSet _nextXrCreateActionSet = NULL;
 static PFN_xrCreateAction _nextXrCreateAction = NULL;
 static PFN_xrCreateActionSpace _nextXrCreateActionSpace = NULL;
 static PFN_xrSuggestInteractionProfileBindings _nextXrSuggestInteractionProfileBindings = NULL;
+static PFN_xrAttachSessionActionSets _nextXrAttachSessionActionSets = NULL;
 
 // cache create infos
 static XrInstanceCreateInfo instanceInfo;
+static XrInstance xrInstance;
 static std::map<XrActionSet, XrActionSetCreateInfo> actionSetInfos;
 static std::map<XrAction, XrActionCreateInfo> actionInfos;
 // only for pose actions
 static std::map<XrAction, XrActionSpaceCreateInfo> actionSpaceInfos;
+// interactionProfile -> bindings. suggesting multiple times for the same profile replaces earlier suggestions
+static std::map<XrPath, XrInteractionProfileSuggestedBinding *> bindings;
+static std::map<XrPath, XrInteractionProfileSuggestedBinding *> modifiedBindings;
 
 static std::map<XrPath, std::string> paths;
 
@@ -89,6 +96,32 @@ _xrCreateActionSpace(XrSession session, const XrActionSpaceCreateInfo *createInf
 	return res;
 }
 
+static XrInteractionProfileSuggestedBinding *
+_deepCopyBinding(const XrInteractionProfileSuggestedBinding *suggestedBindings)
+{
+	XrInteractionProfileSuggestedBinding *copy = new XrInteractionProfileSuggestedBinding;
+	copy->type = suggestedBindings->type;
+	copy->next = suggestedBindings->next; // TODO: handle next
+	copy->countSuggestedBindings = suggestedBindings->countSuggestedBindings;
+	copy->interactionProfile = suggestedBindings->interactionProfile;
+
+	// suggestedBindings->suggestedBindings is const, so have to fill it before assigning
+	XrActionSuggestedBinding *b = new XrActionSuggestedBinding[suggestedBindings->countSuggestedBindings];
+	for (uint32_t i = 0; i < suggestedBindings->countSuggestedBindings; i++) {
+		b[i].action = suggestedBindings->suggestedBindings[i].action;
+		b[i].binding = suggestedBindings->suggestedBindings[i].binding;
+	}
+	copy->suggestedBindings = b;
+	return copy;
+}
+
+static void
+_freeBinding(const XrInteractionProfileSuggestedBinding *suggestedBindings)
+{
+	delete (suggestedBindings->suggestedBindings);
+	delete (suggestedBindings);
+}
+
 static XRAPI_ATTR XrResult XRAPI_CALL
 _xrSuggestInteractionProfileBindings(XrInstance instance, const XrInteractionProfileSuggestedBinding *suggestedBindings)
 {
@@ -97,18 +130,77 @@ _xrSuggestInteractionProfileBindings(XrInstance instance, const XrInteractionPro
 	for (uint32_t i = 0; i < suggestedBindings->countSuggestedBindings; i++) {
 		XrAction action = suggestedBindings->suggestedBindings[i].action;
 		XrPath binding = suggestedBindings->suggestedBindings[i].binding;
-		std::cout << "\t" << actionInfos[action].actionName << "|" << action << " -> " << paths[binding]
-		          << std::endl;
+		std::cout << _layerName << ": \t" << actionInfos[action].actionName << "|" << action << " -> "
+		          << paths[binding] << std::endl;
 	}
 
+	/*
+	 * Do not suggest bindings to the runtime just yet, just collect them all.
+	 * When xrAttachSessionActionSets we know all profiles have been suggested.
+	 * Only then then do we modify them and suggest our modified bindings.
+	 * Deep copy, the application might free the memory after it suggested
+	 */
+	bindings[suggestedBindings->interactionProfile] = _deepCopyBinding(suggestedBindings);
+	(void)instance;
+
+#if 0
 	XrResult res = _nextXrSuggestInteractionProfileBindings(instance, suggestedBindings);
 
 	if (XR_SUCCEEDED(res)) {
 		std::cout << _layerName << ": suggested bindings" << std::endl;
-		for (uint32_t i = 0; i < suggestedBindings->countSuggestedBindings; i++) {
-		};
 	} else {
 		std::cout << _layerName << ": xrSuggestInteractionProfileBindings failed" << std::endl;
+	}
+
+	return res;
+#endif
+
+	return XR_SUCCESS;
+}
+
+static XRAPI_ATTR XrResult XRAPI_CALL
+_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttachInfo *attachInfo)
+{
+	std::cout << _layerName << ": application wants to attach action sets" << std::endl;
+
+	bool succ = createModifiedBindings(xrInstance, &instanceInfo, actionSetInfos, actionInfos, actionSpaceInfos,
+	                                   paths, &bindings, &modifiedBindings);
+
+	if (!succ) {
+		std::cout << _layerName << ": We failed to modify bindings, bailing out!" << std::endl;
+		return XR_ERROR_RUNTIME_FAILURE;
+	}
+
+	std::cout << _layerName << ": modified bindings:" << std::endl;
+	for (const auto &profileBindings : modifiedBindings) {
+		XrInteractionProfileSuggestedBinding *b = profileBindings.second;
+		std::cout << _layerName << ": " << paths[b->interactionProfile] << std::endl;
+		for (uint32_t i = 0; i < b->countSuggestedBindings; i++) {
+			XrAction action = b->suggestedBindings[i].action;
+			XrPath binding = b->suggestedBindings[i].binding;
+			std::cout << _layerName << ": \t" << actionInfos[action].actionName << "|" << action << " -> "
+			          << paths[binding] << std::endl;
+		}
+
+		XrResult res = _nextXrSuggestInteractionProfileBindings(xrInstance, b);
+
+		if (XR_SUCCEEDED(res)) {
+			std::cout << _layerName << ": suggested bindings" << std::endl;
+		} else {
+			std::cout << _layerName << ": xrSuggestInteractionProfileBindings failed" << std::endl;
+		}
+	}
+
+	XrResult res = _nextXrAttachSessionActionSets(session, attachInfo);
+	if (XR_SUCCEEDED(res)) {
+		std::cout << _layerName << ": attaching action sets ";
+		for (uint32_t i = 0; i < attachInfo->countActionSets; i++) {
+			std::cout << actionSetInfos[attachInfo->actionSets[i]].actionSetName << "|"
+			          << attachInfo->actionSets[i] << ", ";
+		}
+		std::cout << std::endl;
+	} else {
+		std::cout << _layerName << ": xrAttachSessionActionSets failed" << std::endl;
 	}
 	return res;
 }
@@ -144,6 +236,12 @@ _xrGetInstanceProcAddr(XrInstance instance, const char *name, PFN_xrVoidFunction
 		*function = (PFN_xrVoidFunction)_xrSuggestInteractionProfileBindings;
 		return XR_SUCCESS;
 	}
+
+	if (func_name == "xrAttachSessionActionSets") {
+		*function = (PFN_xrVoidFunction)_xrAttachSessionActionSets;
+		return XR_SUCCESS;
+	}
+
 
 	return _nextXrGetInstanceProcAddr(instance, name, function);
 }
@@ -198,7 +296,15 @@ _xrCreateApiLayerInstance(const XrInstanceCreateInfo *info,
 		return result;
 	}
 
+	result = _nextXrGetInstanceProcAddr(*instance, "xrAttachSessionActionSets",
+	                                    (PFN_xrVoidFunction *)&_nextXrAttachSessionActionSets);
+	if (XR_FAILED(result)) {
+		std::cout << "Failed to load xrAttachSessionActionSets" << std::endl;
+		return result;
+	}
+
 	instanceInfo = *info;
+	xrInstance = *instance;
 	std::cout << _layerName << ": Created api layer instance for app " << info->applicationInfo.applicationName
 	          << std::endl;
 	;

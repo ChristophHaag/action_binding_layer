@@ -10,12 +10,14 @@ project(
         ],
 )
 
+subdir('external')
+
 openxr_dep = dependency('openxr', required: true)
 
 lib = library('XrApiLayer_action_binding',
 	'api_layer_action_binding.cpp',
 	'ui.cpp',
-	dependencies: [openxr_dep]
+	dependencies: [openxr_dep, libimgui_core_dep],
 	)
 
 # TODO: use install path

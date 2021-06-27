@@ -1,6 +1,6 @@
 project(
         'action_binding_layer',
-        ['cpp'],
+        ['cpp', 'c'],
         version: '0.1',
         license: 'BSL-1.0',
         meson_version: '>=0.49.0',
@@ -13,11 +13,19 @@ project(
 subdir('external')
 
 openxr_dep = dependency('openxr', required: true)
+glfw_dep = dependency('glfw3', required: true)
+
+cc = meson.get_compiler('c')
+if host_machine.system() == 'linux'
+    dl_dep = cc.find_library('dl', required: false)
+else
+    dl_dep = dependency('', required: false)
+endif
 
 lib = library('XrApiLayer_action_binding',
 	'api_layer_action_binding.cpp',
 	'ui.cpp',
-	dependencies: [openxr_dep, libimgui_core_dep],
+	dependencies: [openxr_dep, libimgui_core_dep, glfw_dep, glad_dep, dl_dep],
 	)
 
 # TODO: use install path

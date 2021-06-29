@@ -25,6 +25,7 @@ endif
 lib = library('XrApiLayer_action_binding',
 	'api_layer_action_binding.cpp',
 	'ui.cpp',
+	'util.cpp',
 	dependencies: [openxr_dep, libimgui_core_dep, glfw_dep, glad_dep, dl_dep],
 	)
 

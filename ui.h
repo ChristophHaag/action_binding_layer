@@ -5,12 +5,14 @@
 #include <string>
 #include <map>
 
+extern std::map<XrActionType, const char *> actionTypesStr;
+
 bool
 createModifiedBindings(XrInstance instance,
                        XrInstanceCreateInfo *instanceInfo,
-                       std::map<XrActionSet, XrActionSetCreateInfo> actionSetInfos,
-                       std::map<XrAction, XrActionCreateInfo> actionInfos,
-                       std::map<XrAction, XrActionSpaceCreateInfo> actionSpaceInfos,
-                       std::map<XrPath, std::string> paths,
+                       std::map<XrActionSet, XrActionSetCreateInfo> *actionSetInfos,
+                       std::map<XrAction, XrActionCreateInfo> *actionInfos,
+                       std::map<XrAction, XrActionSpaceCreateInfo> *actionSpaceInfos,
+                       std::map<XrPath, std::string> *paths,
                        std::map<XrPath, XrInteractionProfileSuggestedBinding *> *bindings,
                        std::map<XrPath, XrInteractionProfileSuggestedBinding *> *modifiedBindings);
